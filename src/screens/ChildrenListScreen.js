@@ -1,44 +1,76 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SERVER_URL } from '../config';
 
 export default function ChildrenListScreen({ navigation }) {
   const [children, setChildren] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadChildren = async () => {
-      try {
-        const res = await axios.get(`${SERVER_URL}/api/children`);
-        setChildren(res.data);
-      } catch (err) {
-        console.log(err.message);
-      }
-    };
-    loadChildren();
+    fetchChildren();
   }, []);
 
+  const fetchChildren = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token'); // token JWT do login
+      if (!token) {
+        Alert.alert('Erro', 'Usuário não autenticado');
+        return;
+      }
+
+      const res = await axios.get(`${SERVER_URL}/api/children`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setChildren(res.data); // salva os dados no estado
+      setLoading(false);
+    } catch (err) {
+      console.log(err);
+      Alert.alert('Erro', 'Não foi possível carregar as crianças.');
+      setLoading(false);
+    }
+  };
+
+  const renderItem = ({ item }) => (
+    <TouchableOpacity
+      style={styles.item}
+      onPress={() => navigation.navigate('Attendance', { child: item })}
+    >
+      <Text style={styles.name}>{item.nome}</Text>
+      <Text>CPF: {item.cpf}</Text>
+      <Text>Data de Nascimento: {item.data_nascimento}</Text>
+    </TouchableOpacity>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <Text>Carregando crianças...</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={children}
-        keyExtractor={(item) => item.cpf}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.childItem}
-            onPress={() => navigation.navigate('Attendance', { child: item })}
-          >
-            <Text style={styles.childName}>{item.name}</Text>
-            <Text>{item.cpf}</Text>
-          </TouchableOpacity>
-        )}
-      />
-    </View>
+    <FlatList
+      data={children}
+      keyExtractor={(item) => item.id.toString()}
+      renderItem={renderItem}
+      contentContainerStyle={{ padding: 20 }}
+      ListEmptyComponent={<Text>Nenhuma criança encontrada.</Text>}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
-  childItem: { padding: 15, borderBottomWidth: 1, borderColor: '#ccc' },
-  childName: { fontWeight: 'bold', fontSize: 16 },
+  item: {
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    marginBottom: 10,
+  },
+  name: { fontWeight: 'bold', fontSize: 16 },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });
