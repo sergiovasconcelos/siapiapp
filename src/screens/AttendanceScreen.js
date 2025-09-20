@@ -10,10 +10,13 @@ export default function AttendanceScreen({ route, navigation }) {
   const { child } = route.params; // Recebe os dados da criança da tela anterior
   const [actions, setActions] = useState('');
   const [location, setLocation] = useState(null);
-  const [professionalCpf, setProfessionalCpf] = useState('');
+  const [token, setToken] = useState('');
 
   useEffect(() => {
-    AsyncStorage.getItem('professionalCpf').then(cpf => setProfessionalCpf(cpf));
+    // Recupera token salvo no login
+    AsyncStorage.getItem('token').then(t => {
+      if (t) setToken(t);
+    });
   }, []);
 
   const getLocation = async () => {
@@ -32,15 +35,20 @@ export default function AttendanceScreen({ route, navigation }) {
     if (!coords) return;
 
     try {
-      await axios.post(`${SERVER_URL}/api/attendance/start`, {
-        childCpf: child.cpf,
-        professionalCpf,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        startedAt: new Date().toISOString(),
-      });
-      Alert.alert('Sucesso', 'Atendimento iniciado.');
+      const res = await axios.post(
+        `${SERVER_URL}/api/attendances/start`,
+        {
+          child_id: child.id, // usa o id da criança, conforme backend
+          started_lat: coords.latitude,
+          started_lng: coords.longitude,
+          started_at: new Date().toISOString(),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      Alert.alert('Sucesso', `Atendimento iniciado (ID ${res.data.attendanceId}).`);
     } catch (err) {
+      console.error(err);
       Alert.alert('Erro', err.response?.data?.error || err.message);
     }
   };
@@ -50,40 +58,49 @@ export default function AttendanceScreen({ route, navigation }) {
     if (!coords) return;
 
     try {
-      await axios.post(`${SERVER_URL}/api/attendance/finish`, {
-        childCpf: child.cpf,
-        professionalCpf,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        finishedAt: new Date().toISOString(),
-        actionsPerformed: actions,
-        status: 'FINALIZADA',
-      });
+      // Buscar último atendimento ativo dessa criança
+      const resAttendances = await axios.get(
+        `${SERVER_URL}/api/attendances?status=INICIADO`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const activeAttendance = resAttendances.data.find(a => a.child_id === child.id);
+      if (!activeAttendance) {
+        Alert.alert('Erro', 'Nenhum atendimento iniciado para esta criança.');
+        return;
+      }
+
+      await axios.post(
+        `${SERVER_URL}/api/attendances/${activeAttendance.id}/finish`,
+        {
+          finished_lat: coords.latitude,
+          finished_lng: coords.longitude,
+          finished_at: new Date().toISOString(),
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Salva ações no banco
+      if (actions.trim()) {
+        await axios.post(
+          `${SERVER_URL}/api/attendances/${activeAttendance.id}/actions`,
+          { descricao: actions },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+
       Alert.alert('Sucesso', 'Atendimento finalizado.');
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Erro', err.response?.data?.error || err.message);
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      await axios.post(`${SERVER_URL}/api/attendance/save`, {
-        childCpf: child.cpf,
-        professionalCpf,
-        actionsPerformed: actions,
-      });
-      Alert.alert('Sucesso', 'Ações salvas.');
-    } catch (err) {
+      console.error(err);
       Alert.alert('Erro', err.response?.data?.error || err.message);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Nome: {child.name}</Text>
-      <Text style={styles.label}>Data de Nascimento: {child.birthDate}</Text>
-      <Text style={styles.label}>Idade: {child.age}</Text>
+      <Text style={styles.label}>Nome: {child.nome}</Text>
+      <Text style={styles.label}>Data de Nascimento: {child.data_nascimento}</Text>
       <Text style={styles.label}>CPF: {child.cpf}</Text>
 
       <Text style={styles.label}>Ações Realizadas:</Text>
@@ -96,7 +113,6 @@ export default function AttendanceScreen({ route, navigation }) {
 
       <View style={styles.buttonContainer}>
         <Button title="Iniciar Atendimento" onPress={handleStart} />
-        <Button title="Salvar" onPress={handleSave} />
         <Button title="Finalizar Atendimento" onPress={handleFinish} />
       </View>
 
